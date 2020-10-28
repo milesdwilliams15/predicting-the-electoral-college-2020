@@ -4,8 +4,8 @@
 #######################################
 
 # Data for this analysis come from 538's
-# election-forcast-2020 .zip folder, file
-# name: presidential_polls_2020
+# election-forcast-2020 .zip folder.
+# file name: presidential_polls_2020.csv
 
 
 # libraries ---------------------------------------------------------------
@@ -21,7 +21,7 @@ polls <- read_csv(
 # size of the data:
 dim(polls)
 
-# put dates in data format
+# put dates in date format
 polls %>%
   mutate(
     modeldate = as.Date(
@@ -35,7 +35,8 @@ polls %>%
     )
   ) -> polls
 
-# eliminate dates past nov. 3
+# hone in on polls with enddates 
+# from Oct. 1 to Nov. 3
 polls %>%
   filter(
     enddate <= "2020-11-4" &
@@ -70,10 +71,9 @@ ggplot(polls) +
   )
 
 
-# compute polls for nov. 3 by state ---------------------------------------
+# estimate candidate percentages by state ---------------------------------
 
-# give me the proportion of polls where Biden 
-# wins:
+# Clean up
 polls %>%
   select(
     state, enddate, candidate_name, pct, weight
@@ -90,6 +90,8 @@ polls %>%
     Biden_win = as.numeric(Biden_margin>0)
   ) -> tidy_polls
 
+# Estimate weighted proportion of polls
+# where Biden wins by state:
 tidy_polls %>%
   group_by(state) %>%
   summarize(
