@@ -95,7 +95,7 @@ polls %>%
 tidy_polls %>%
   group_by(state) %>%
   summarize(
-    Biden_prop = sum(weight*Biden_win)/sum(weight),
+    Biden_prop = mean(Biden_win),
     Trump_prop = 1 - Biden_prop
   ) %>%
   arrange(-Biden_prop) %>%
@@ -163,4 +163,116 @@ plot_usmap(
   ggsave(
     '03_figures/electoral_map.pdf',
     height = 6, width = 6
+  )
+
+
+# the likelihood of a Biden Victory ---------------------------------------
+
+# load data on electoral college totals from 2012
+ec <- read_csv(
+  "01_data/tables2012.csv"
+) %>%
+  select(-X4,-X5) %>%
+  mutate(
+    dem = replace_na(dem,0),
+    rep = replace_na(rep,0),
+    total = dem + rep
+  ) %>%
+  select(-dem,-rep)
+
+abbs <- tibble(state_ID = state.abb,state = state.name) 
+state_outcomes <- state_outcomes %>%
+  filter(state %in% state.name) %>%
+  filter(candidate == 'Biden_prop') %>%
+  arrange(state) %>%
+  left_join(.,abbs,by='state') %>%
+  left_join(.,ec,by='state_ID') %>%
+  select(state_ID,state,everything(),-candidate)
+
+# simulation 1000 elections
+elections <- 1000
+outcomes <- list() # 1 will equal Biden victory
+for(i in 1:elections) {
+  cat('Election',i,'of',elections,'\r\r\r\r\r')
+  
+  # reveal outcomes
+  outcomes[[i]] <- state_outcomes %>%
+    mutate(
+      outcome = rbinom(n(),1,win_prob)
+    ) %>%
+    summarize(
+      total = sum(total*outcome)
+    ) 
+  
+  if(i == elections) cat('\nDone!')
+}
+do.call(rbind,outcomes) %>%
+  mutate(
+    win = total>=270 %>% as.numeric
+  ) -> outcomes
+
+ggplot(outcomes) +
+  aes(
+    1:elections,
+    total
+  ) +
+  geom_col(color = 'orange') +
+  geom_hline(yintercept = 270,lty=2) +
+  labs(
+    x = 'Election',
+    y = 'Electoral College Total'
+  )
+
+outcomes %>%
+  summarize(
+    median = median(total),
+    lo = quantile(total,0.025),
+    hi = quantile(total,0.975)
+  ) -> smry
+ggplot(smry) +
+  aes(
+    x = median,
+    y = 1,
+    xmin = lo,
+    xmax = hi
+  ) +
+  geom_point(col='darkorange') +
+  geom_errorbarh(col='darkorange',height=.45) +
+  geom_text(
+    aes(label = median),
+    vjust = 1.5,
+    col = 'darkblue'
+  ) +
+  ggpubr::geom_bracket(
+    y.position = 1.25,
+    xmin = smry$lo,
+    xmax = smry$hi,
+    label = "95% of outcomes",
+    col = 'darkgrey',
+    vjust = 2
+  ) +
+  geom_vline(xintercept=270,lty=2) +
+  scale_x_continuous(
+    n.breaks = 20
+  ) +
+  scale_y_continuous(breaks=NULL) +
+  labs(
+    x='Electoral College Total',
+    y='',
+    title = "Biden's Expected Margin of Victory"
+  ) +
+  theme_minimal() +
+  theme(
+    panel.grid.minor = element_blank(),
+    axis.text.x = element_text(
+      color = c(
+        'black',
+        rep('darkgrey',len=19)
+      )
+    )
+  ) +
+  ggsave(
+    '03_figures/expected-margin.pdf',
+    height = 3,
+    width = 5
   )
