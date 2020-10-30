@@ -95,7 +95,8 @@ polls %>%
 tidy_polls %>%
   group_by(state) %>%
   summarize(
-    Biden_prop = mean(Biden_win),
+    Biden_prop = sum(weight*Biden_win)/
+      sum(weight),
     Trump_prop = 1 - Biden_prop
   ) %>%
   arrange(-Biden_prop) %>%
@@ -198,7 +199,15 @@ for(i in 1:elections) {
   # reveal outcomes
   outcomes[[i]] <- state_outcomes %>%
     mutate(
-      outcome = rbinom(n(),1,win_prob)
+      win_prob = case_when(
+        win_prob == 1 ~ 0.95,
+        win_prob == 0 ~ 0.05,
+        win_prob <= 1 &
+          win_prob >= 0 ~ win_prob
+      )
+    ) %>%
+      mutate(
+        outcome = rbinom(n(),1,win_prob)
     ) %>%
     summarize(
       total = sum(total*outcome)
@@ -227,7 +236,8 @@ outcomes %>%
   summarize(
     median = median(total),
     lo = quantile(total,0.025),
-    hi = quantile(total,0.975)
+    hi = quantile(total,0.975),
+    wins = 100*mean(win)
   ) -> smry
 ggplot(smry) +
   aes(
@@ -239,8 +249,9 @@ ggplot(smry) +
   geom_point(col='darkorange') +
   geom_errorbarh(col='darkorange',height=.45) +
   geom_text(
-    aes(label = median),
-    vjust = 1.5,
+    aes(label = paste0(median,' (Median)')),
+    vjust = -1.5,
+    hjust = 0.2,
     col = 'darkblue'
   ) +
   ggpubr::geom_bracket(
@@ -259,7 +270,16 @@ ggplot(smry) +
   labs(
     x='Electoral College Total',
     y='',
-    title = "Biden's Expected Margin of Victory"
+    title = "Biden's Expected Margin of Victory",
+    subtitle = "Results from 1,000 elections"
+  ) +
+  annotate(
+    'text',
+    x = 320,
+    y = .8,
+    fontface = 'italic',
+    label = paste0('Biden wins ',smry$wins,
+                   '% of the time')
   ) +
   theme_minimal() +
   theme(
@@ -269,10 +289,15 @@ ggplot(smry) +
         'black',
         rep('darkgrey',len=19)
       )
+    ),
+    plot.subtitle = element_text(
+      face = 'italic'
     )
   ) +
   ggsave(
     '03_figures/expected-margin.pdf',
     height = 3,
-    width = 5
+    width = 4.5
   )
+
+
