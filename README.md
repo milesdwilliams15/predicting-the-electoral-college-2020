@@ -25,7 +25,7 @@ Now, these results should not, in any way, lead us to conclude that the betting 
 
 However, we can entertain another question: how surprised would we have been that Biden won in 2020 with 306 electoral votes if we had relied on the betting markets, the polls, or some combination? This question not only is answerable, we can put an exact number on it. Consider the following distribution of election outcomes per three different Monte Carlo experiments.
 
-![distribution](https://github.com/milesdwilliams15/predicting-the-electoral-college-2020/blob/main/03_figures/expected-margin.png)
+![distribution](https://github.com/milesdwilliams15/predicting-the-electoral-college-2020/blob/main/03_figures/distribution.png)
 
 This figure shows the proportion out of 999 simulated elections that Biden received a certain number of electoral college votes. The bottom, middle, and top panels are based on state-level probabilities as determined by betting market prices, polls, and Bayesian updating respectively. Clearly, we can see that under each of these approaches, the method that would leave us least surprised to see Biden win with 306 votes was the prediction market, followed by the Bayesian approach and the polls, in that order.
 
