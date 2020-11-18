@@ -14,9 +14,35 @@ library(tidyverse)
 
 # data --------------------------------------------------------------------
 
+# State abbreviations:
+abbs <- tibble(state_ID = c(state.abb,"DC"),
+               state = c(state.name,"District of Columbia"))
+
+# Polls from 538
 polls <- read_csv(
   "01_data/polls.csv"
 )
+
+# Marke prices from PredictIt
+markets <- read_csv(
+  "01_data/markets.csv"
+) %>% left_join(
+  abbs, by = 'state_ID'
+)
+
+# Electoral college totals per state
+ec <- read_csv(
+  "01_data/tables2012.csv"
+) %>%
+  mutate(
+    dem = replace_na(dem,0),
+    rep = replace_na(rep,0),
+    total = dem + rep
+  ) %>%
+  select(-dem,-rep) %>%
+  left_join(
+    abbs, by = 'state_ID'
+  )
 
 # size of the data:
 dim(polls)
@@ -169,135 +195,232 @@ plot_usmap(
 
 # the likelihood of a Biden Victory ---------------------------------------
 
-# load data on electoral college totals from 2012
-ec <- read_csv(
-  "01_data/tables2012.csv"
-) %>%
-  select(-X4,-X5) %>%
-  mutate(
-    dem = replace_na(dem,0),
-    rep = replace_na(rep,0),
-    total = dem + rep
-  ) %>%
-  select(-dem,-rep)
-
-abbs <- tibble(state_ID = state.abb,state = state.name) 
 state_outcomes <- state_outcomes %>%
   filter(state %in% state.name) %>%
   filter(candidate == 'Biden_prop') %>%
   arrange(state) %>%
-  left_join(.,abbs,by='state') %>%
-  left_join(.,ec,by='state_ID') %>%
-  select(state_ID,state,everything(),-candidate)
+  left_join(markets,by='state') %>%
+  left_join(ec,by='state') %>%
+  select(state,everything(),-candidate,-
+           contains('ID'))
 
-# simulation 1000 elections
-elections <- 1000
+# calculate bayesian probabilities using
+# market prices as priors
+bern_post <- function(prior,like) {
+  success <- prior + like
+  failure <- (1-prior) + (1-like)
+  prediction <- success/(success + failure)
+  return(prediction)
+}
+state_outcomes %>%
+  mutate(
+    win_prob = case_when(
+      win_prob == 1 ~ 0.99,
+      win_prob == 0 ~ 0.01,
+      win_prob <1 & win_prob>0 ~ win_prob
+    )
+  ) %>%
+  mutate(
+    post_prob = bern_post(
+      prior = market_price,
+      like = win_prob
+    )
+  ) -> state_outcomes
+
+# simulate 40,000 elections
+elections <- 999 #40000
 outcomes <- list() # 1 will equal Biden victory
 for(i in 1:elections) {
   cat('Election',i,'of',elections,'\r\r\r\r\r')
   
   # reveal outcomes
   outcomes[[i]] <- state_outcomes %>%
-    mutate(
-      win_prob = case_when(
-        win_prob == 1 ~ 0.95,
-        win_prob == 0 ~ 0.05,
-        win_prob <= 1 &
-          win_prob >= 0 ~ win_prob
-      )
-    ) %>%
       mutate(
-        outcome = rbinom(n(),1,win_prob)
+        polls = rbinom(n(),1,win_prob),
+        prices = rbinom(n(),1,market_price),
+        bayes = rbinom(n(),1,post_prob)
     ) %>%
     summarize(
-      total = sum(total*outcome)
+      polls = sum(total*polls),
+      prices = sum(total*prices),
+      bayes = sum(total*bayes)
     ) 
   
   if(i == elections) cat('\nDone!')
 }
 do.call(rbind,outcomes) %>%
   mutate(
-    win = total>=270 %>% as.numeric
+    polls_win = polls >=270,
+    prices_win = prices >= 270,
+    bayes_win = bayes >= 270
   ) -> outcomes
 
-ggplot(outcomes) +
-  aes(
-    1:elections,
-    total
-  ) +
-  geom_col(color = 'orange') +
-  geom_hline(yintercept = 270,lty=2) +
-  labs(
-    x = 'Election',
-    y = 'Electoral College Total'
-  )
-
 outcomes %>%
-  summarize(
-    median = median(total),
-    lo = quantile(total,0.025),
-    hi = quantile(total,0.975),
-    wins = 100*mean(win)
+  summarize_at(
+    c('polls','prices','bayes'),
+    .funs = c(median,
+              function(x) quantile(x,.025),
+              function(x) quantile(x,0.975))
   ) -> smry
+smry %>%
+  gather() %>%
+  mutate(
+    key = c(
+      rep('Median',len=3),
+      rep('2.5 Percentile',len=3),
+      rep('97.5 Percentile',len=3)
+    ),
+    Method = c(
+      rep(
+        c('Polls','Prices','Bayes'),
+        len=9
+      )
+    )
+  ) %>%
+  spread(
+    key = key,
+    value = value
+  ) -> smry
+
 ggplot(smry) +
   aes(
-    x = median,
-    y = 1,
-    xmin = lo,
-    xmax = hi
+    Median,
+    reorder(Method,-Median),
+    xmin = `2.5 Percentile`,
+    xmax = `97.5 Percentile`,
+    label = Median
   ) +
-  geom_point(col='darkorange') +
-  geom_errorbarh(col='darkorange',height=.45) +
+  geom_col(
+    fill = 'darkorange'
+  ) +
+  geom_errorbarh(
+    height = .1
+  ) +
   geom_text(
-    aes(label = paste0(median,' (Median)')),
-    vjust = -1.5,
-    hjust = 0.2,
-    col = 'darkblue'
+    vjust = 1,
+    hjust = 0
   ) +
-  ggpubr::geom_bracket(
-    y.position = 1.25,
-    xmin = smry$lo,
-    xmax = smry$hi,
-    label = "95% of outcomes",
-    col = 'darkgrey',
-    vjust = 2
+  geom_vline(
+    xintercept = 270,
+    lty = 2
   ) +
-  geom_vline(xintercept=270,lty=2) +
-  scale_x_continuous(
-    n.breaks = 20
-  ) +
-  scale_y_continuous(breaks=NULL) +
   labs(
-    x='Electoral College Total',
-    y='',
-    title = "Biden's Expected Margin of Victory",
-    subtitle = "Results from 1,000 elections"
+    x = 'Electoral Votes for Biden',
+    y = ' ',
+    title = 'Simulated Electoral Outcomes',
+    subtitle = 'U.S. President 2020',
+    caption = 'milesdwilliams15'
   ) +
-  annotate(
-    'text',
-    x = 320,
-    y = .8,
-    fontface = 'italic',
-    label = paste0('Biden wins ',smry$wins,
-                   '% of the time')
+  scale_x_continuous(
+    breaks = c(
+      c(0,100,200,270,300,400)
+    ) 
   ) +
-  theme_minimal() +
+  ggridges::theme_ridges() +
   theme(
-    panel.grid.minor = element_blank(),
     axis.text.x = element_text(
-      color = c(
-        'black',
-        rep('darkgrey',len=19)
-      )
-    ),
-    plot.subtitle = element_text(
-      face = 'italic'
+      angle = 45, hjust = 1,
+      face = c('italic',
+               'italic',
+               'italic',
+               'bold.italic',
+               'italic',
+               'italic')
+    )
+  ) + 
+  ggsave(
+    '03_figures/expected-margin.png',
+    height = 4,
+    width = 6
+  )
+
+# probability of 306 electoral votes
+
+
+bind_rows(
+  outcomes %>% count(polls) %>% 
+    rename(votes = polls) %>%
+    mutate(Method = 'Polls'),
+  outcomes %>% count(prices) %>%
+    rename(votes = prices) %>%
+    mutate(Method = 'Prices'),
+  outcomes %>% count(bayes) %>%
+    rename(votes = bayes) %>%
+    mutate(Method = 'Bayes')
+) %>% 
+  mutate(
+    percent = n/elections*100
+  ) -> counts
+
+counts %>%
+  filter(votes <= 306 & votes >= 270) %>%
+  group_by(Method) %>%
+  summarize(
+    percent = sum(percent)
+  ) %>%
+  ggplot() +
+  aes(
+    percent, reorder(Method,percent),
+    label = round(percent,1)
+  ) +
+  geom_point() +
+  geom_text(vjust = -1) +
+  xlim(c(0,40)) +
+  labs(
+    x = 'Percent Wins with 306 Votes',
+    y = '',
+    title = 'Simulated Electoral Outcomes',
+    subtitle = 'U.S. President 2020',
+    caption = 'milesdwilliams15'
+  ) +
+  ggridges::theme_ridges() +
+  theme(
+    panel.grid.major.y = element_line(
+      linetype = 3, color = 'black'
     )
   ) +
   ggsave(
-    '03_figures/expected-margin.pdf',
-    height = 3,
-    width = 4.5
+    '03_figures/surprise.png',
+    height = 4,
+    width = 6
   )
 
-
+counts %>%
+  ggplot() +
+  aes(
+    votes, percent/100,
+    fill = Method
+  ) +
+  geom_col(alpha = .5) +
+  labs(
+    x = 'Electoral Votes for Biden',
+    y = 'Probability',
+    title = "Simulated Electoral Outcomes",
+    subtitle = "U.S. President 2020",
+    caption = 'milesdwilliams15'
+  ) +
+  geom_vline(
+    xintercept = 270,lty=2
+  ) +
+  scale_x_continuous(
+    breaks = c(
+      c(200,270,300,400)
+    )
+  ) +
+  facet_wrap(~ Method, ncol = 1) +
+  ggridges::theme_ridges() +
+  theme(
+    legend.position = 'none',
+    axis.text.x = element_text(
+      angle = 45, hjust = 1,
+      face = c('italic',
+               'bold.italic',
+               'italic',
+               'italic')
+    )
+  ) +
+  ggsave(
+    '03_figures/distribution.png',
+    height = 4,
+    width = 6
+  )
